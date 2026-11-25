@@ -1,0 +1,4 @@
+import {
+  "jiujitong/skycal" @skycal,
+  "moonbitlang/core/math" @math,
+}
