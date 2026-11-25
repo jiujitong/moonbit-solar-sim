@@ -1,0 +1,5 @@
+// import {
+//   "jiujitong/solar-sim" @lib,
+// }
+
+pkgtype(kind: "executable")
