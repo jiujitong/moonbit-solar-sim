@@ -1,5 +1,6 @@
-// import {
-//   "jiujitong/solar-sim" @lib,
-// }
+import {
+  "jiujitong/solar-sim" @sim,
+  "jiujitong/skycal" @skycal,
+}
 
 pkgtype(kind: "executable")

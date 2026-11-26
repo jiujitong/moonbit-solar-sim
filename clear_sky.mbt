@@ -159,3 +159,133 @@ pub fn clear_sky_tilted_irradiance(
   let dni = dni_clear_sky(alt, turbidity, jd)
   hay_tilted(ghi, dni, alt, inc, tilt_deg, ground_albedo)
 }
+
+///|
+// Atmospheric turbidity presets for common sky conditions.
+pub enum TurbidityPreset {
+  Clear     // Very clear mountain air
+  Standard  // Mid-latitude rural summer (default)
+  Hazy      // Urban/suburban
+  Smoggy    // Heavy urban smog
+  Desert    // Clear but dusty
+  Maritime  // Ocean-moderated
+}
+
+///|
+pub fn turbidity_from_preset(p : TurbidityPreset) -> Double {
+  match p {
+    Clear => 1.0
+    Standard => 2.0
+    Hazy => 3.0
+    Smoggy => 5.0
+    Desert => 2.5
+    Maritime => 2.2
+  }
+}
+
+///|
+// Beam normal irradiance (DNI) from global horizontal irradiance and beam
+// horizontal irradiance. Returns 0.0 at low sun angles where sine(alt) is
+// tiny (would blow up the division).
+pub fn beam_normal_from_ghi_dni(
+  ghi_whm2 : Double,
+  beam_horiz_whm2 : Double,
+  solar_alt_deg : Double,
+) -> Double {
+  let s = @skycal.sin_deg(solar_alt_deg)
+  if s < 0.01 {
+    return 0.0
+  }
+  beam_horiz_whm2 / s
+}
+
+///|
+// Diffuse horizontal irradiance (DHI) from GHI minus beam horizontal.
+pub fn diffuse_horizontal(
+  ghi_whm2 : Double,
+  dni_whm2 : Double,
+  solar_alt_deg : Double,
+) -> Double {
+  (ghi_whm2 - dni_whm2 * @skycal.sin_deg(solar_alt_deg)).max(0.0)
+}
+
+///|
+// Simplified Reindl 1990 diffuse fraction correlation. Returns 0–1.
+// Assumes beam+diffuse horizontal = GHI (consistency).
+pub fn diffuse_fraction_reindl(kt : Double, _solar_alt_deg : Double) -> Double {
+  let kt_safe = kt.max(0.0).min(1.0)
+  if kt_safe > 0.8 { return 0.0 }
+  if kt_safe < 0.2 { return 1.0 }
+  // Linear blend between kt=0.2 (all diffuse) and kt=0.8 (all beam)
+  let x = (kt_safe - 0.2) / 0.6
+  let frac = 1.0 - x
+  frac.min(1.0).max(0.0)
+}
+
+///|
+// Approximate daylight hours for a given date and location. Integrates 2-minute
+// clear-sky GHI to find when the sun is above a threshold (default 1 W/m²).
+pub fn daylight_hours(
+  year : Int32,
+  month : Int32,
+  day : Int32,
+  pos : @skycal.GeoPos,
+  turbidity : Double,
+  threshold_whm2 : Double,
+) -> Double {
+  let jd_start = @skycal.julian_date(year, month, day, 0, 0, 0)
+  let step_min = 2.0
+  let steps_per_day = 720
+  let mut hours_above = 0.0
+  let mut prev_above = false
+  let mut prev_h = 0.0
+  for i in 0..<steps_per_day {
+    let t_h = (i.to_double() * step_min) / 60.0
+    let jd = jd_start + t_h / 24.0
+    let sp = @skycal.sun_position(jd, pos)
+    let alt = sp.get_altitude()
+    let above = alt > 0.0
+    if above {
+      let ghi = ghi_clear_sky(alt, turbidity, jd)
+      if ghi > threshold_whm2 {
+        hours_above = hours_above + step_min / 60.0
+      }
+    }
+    prev_above = above
+    prev_h = alt
+  }
+  hours_above
+}
+
+///|
+// Annual daylight hours for a location and year. Sums day-by-day.
+pub fn annual_daylight_hours(
+  year : Int32,
+  pos : @skycal.GeoPos,
+  turbidity : Double,
+) -> Double {
+  let mut total = 0.0
+  for m in 1..<=12 {
+    let dim = days_in_month_public(year, m)
+    for d in 1..<=dim {
+      total = total + daylight_hours(year, m, d, pos, turbidity, 1.0)
+    }
+  }
+  total
+}
+
+///|
+// Days in month helper (re-exported from pvsim naming convention).
+// Lives in clear_sky so daylight_hours can avoid a circular module dep.
+pub fn days_in_month_public(year : Int32, month : Int32) -> Int32 {
+  match month {
+    2 =>
+      if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
+        29
+      } else {
+        28
+      }
+    4 | 6 | 9 | 11 => 30
+    _ => 31
+  }
+}
